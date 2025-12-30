@@ -11,6 +11,7 @@ import * as voucherService from '../vouchers/vouchers.service.js';
 import { queueOrderProcessing } from '../../workers/order.worker.js';
 import { orderQueue } from '../../workers/index.js';
 import { PaymentResult } from '../payments/payments.service.js';
+import { scheduleSingleOrderExpiry } from '../../workers/order.worker.js';
 
 const formatIdr = (val: number) => {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val);
@@ -31,7 +32,7 @@ export interface CreateOrderInput {
  * Create a new order
  */
 export const createOrder = async (input: CreateOrderInput): Promise<Order> => {
-  return prisma.$transaction(async (tx) => {
+  const order = await prisma.$transaction(async (tx) => {
     // 1. Check pending limit
     const pendingCount = await tx.order.count({
       where: { userId: input.userId, status: 'PENDING' }
@@ -73,8 +74,21 @@ export const createOrder = async (input: CreateOrderInput): Promise<Order> => {
     });
 
     logger.info({ orderId: order.id, voucherId }, 'Order created');
+
+    // Schedule Exact 15-minute Expiry
+    // We do this AFTER transaction to ensure order exists
+    // Background job, no need to await strictly if not critical path, but better await.
+    // However, we are inside a transaction? No, wait. 
+    // Creating order is inside a transaction. We should schedule AFTER the transaction commits.
+    // But prisma.$transaction returns 'order'.
+    // So we can schedule it OUTSIDE structure below.
     return order;
   });
+
+  // Schedule Delayed Job
+  await scheduleSingleOrderExpiry(orderQueue, order.id, 15 * 60 * 1000);
+
+  return order;
 };
 
 /**
@@ -590,6 +604,7 @@ export const expirePendingOrders = async (
       status: 'PENDING',
       createdAt: { lt: cutoff },
     },
+    include: { user: true } // Fetch user for notification
   });
 
   let expiredCount = 0;
@@ -597,89 +612,105 @@ export const expirePendingOrders = async (
 
   for (const order of pendingOrders) {
     try {
-      // SAFETY CHECK: If payment was initiated, verify with Midtrans first
-      if (order.midtransId) {
-        try {
-          const status = await paymentsService.getTransactionStatus(order.midtransId);
-
-          // If Midtrans says payment succeeded, process it instead of expire!
-          if (paymentsService.isTransactionSuccess(status)) {
-            logger.info(
-              { orderId: order.id, midtransId: order.midtransId },
-              'Found paid order during expiry check - recovering...'
-            );
-
-            // Process as success
-            await handlePaymentSuccess(order.id);
-            recoveredCount++;
-            continue; // Skip expiration
-          }
-
-          // If Midtrans says pending but not expired yet, give grace period
-          // This handles the edge case where user paid at minute 59
-          if (paymentsService.isTransactionPending(status)) {
-            const orderAge = Date.now() - new Date(order.createdAt).getTime();
-            const gracePeriodMs = 70 * 60 * 1000; // 70 minutes (10 min buffer after 60 min payment expiry)
-
-            if (orderAge < gracePeriodMs) {
-              logger.debug(
-                { orderId: order.id, ageMinutes: Math.floor(orderAge / 60000) },
-                'Order still in grace period - skipping expiry'
-              );
-              continue; // Wait longer
-            }
-          }
-
-          // If failed/expired in Midtrans, safe to expire our order
-
-          // If failed/expired in Midtrans, safe to expire our order
-        } catch (checkError) {
-          // Midtrans check failed (API Down, Timeout, etc)
-          // CRITICAL FIX: Do NOT expire the order if we can't verify payment status!
-          // It's possible the user PAID, but Midtrans API is unreachable.
-          // We must protect the user's potential payment.
-          logger.warn(
-            { error: (checkError as Error).message, orderId: order.id, midtransId: order.midtransId },
-            '⚠️ Failed to check Midtrans status during expiry - SKIPPING expiry to protect potential payment'
-          );
-          continue; // Skip expiration for this order
-        }
+      if (await expireSingleOrder(order.id, order)) {
+        expiredCount++;
+      } else {
+        // We can track skipped/recovered if necessary
       }
-
-      // ATOMIC UPDATE: Only expire if STILL pending
-      const result = await prisma.order.updateMany({
-        where: {
-          id: order.id,
-          status: 'PENDING'
-        },
-        data: { status: 'EXPIRED' }
-      });
-
-      if (result.count === 0) {
-        // Order status changed (probably PAID by webhook), skip
-        continue;
-      }
-
-      await inventoryService.releaseInventory(
-        order.chain,
-        order.symbol,
-        order.amountToken
-      );
-
-      // Release Voucher
-      if (order.voucherId) {
-        await voucherService.releaseVoucher(order.voucherId);
-      }
-
-      expiredCount++;
     } catch (error) {
       logger.error({ error, orderId: order.id }, 'Failed to expire order');
     }
   }
+}
 
-  if (expiredCount > 0 || recoveredCount > 0) {
-    logger.info({ expiredCount, recoveredCount }, 'Order expiry job completed');
+return expiredCount;
+};
+
+/**
+ * Expire a SINGLE order (Reuse logic)
+ * Returns true if expired, false otherwise
+ */
+export const expireSingleOrder = async (orderId: string, orderData?: Order & { user?: any }): Promise<boolean> => {
+  const order = orderData || await prisma.order.findUnique({ where: { id: orderId }, include: { user: true } });
+
+  if (!order) return false;
+  if (order.status !== 'PENDING') return false;
+
+  // SAFETY CHECK: If payment was initiated, verify with Midtrans first
+  if (order.midtransId) {
+    try {
+      const status = await paymentsService.getTransactionStatus(order.midtransId);
+
+      // If Midtrans says payment succeeded, process it instead of expire!
+      if (paymentsService.isTransactionSuccess(status)) {
+        logger.info(
+          { orderId: order.id, midtransId: order.midtransId },
+          'Found paid order during expiry check - recovering...'
+        );
+
+        // Process as success
+        await handlePaymentSuccess(order.id);
+        return false; // Recovered, not expired
+      }
+
+      // If Midtrans says pending but not expired yet, give grace period
+      // This handles the edge case where user paid at minute 59
+      if (paymentsService.isTransactionPending(status)) {
+        const orderAge = Date.now() - new Date(order.createdAt).getTime();
+        const gracePeriodMs = 70 * 60 * 1000; // 70 minutes (10 min buffer after 60 min payment expiry)
+
+        if (orderAge < gracePeriodMs) {
+          logger.debug(
+            { orderId: order.id, ageMinutes: Math.floor(orderAge / 60000) },
+            'Order still in grace period - skipping expiry'
+          );
+          return false; // Wait longer
+        }
+      }
+
+      // If failed/expired in Midtrans, safe to expire our order
+
+      // If failed/expired in Midtrans, safe to expire our order
+    } catch (checkError) {
+      // Midtrans check failed (API Down, Timeout, etc)
+      // CRITICAL FIX: Do NOT expire the order if we can't verify payment status!
+      // It's possible the user PAID, but Midtrans API is unreachable.
+      // We must protect the user's potential payment.
+      logger.warn(
+        { error: (checkError as Error).message, orderId: order.id, midtransId: order.midtransId },
+        '⚠️ Failed to check Midtrans status during expiry - SKIPPING expiry to protect potential payment'
+      );
+      return false; // Skip expiration for this order
+    }
   }
 
-  return expiredCount;
+  // ATOMIC UPDATE: Only expire if STILL pending
+  const result = await prisma.order.updateMany({
+    where: {
+      id: order.id,
+      status: 'PENDING'
+    },
+    data: { status: 'EXPIRED' }
+  });
+
+  if (result.count === 0) {
+    return false;
+  }
+
+  await inventoryService.releaseInventory(
+    order.chain,
+    order.symbol,
+    order.amountToken
+  );
+
+  // Release Voucher
+  if (order.voucherId) {
+    await voucherService.releaseVoucher(order.voucherId);
+  }
+
+  // NOFIY USER
+  await notificationsService.notifyOrderExpired(order);
+
+  // No changes needed here, just ensuring end of function is clean
+  return true;
 };

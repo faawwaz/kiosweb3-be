@@ -15,6 +15,10 @@ export const orderWorker = (connection: { host: string; port: number }): Worker 
         if (job.name === 'expire') {
           const expiredCount = await ordersService.expirePendingOrders(15);
           return { expiredCount };
+        } else if (job.name === 'expire_single') {
+          const orderId = job.data.orderId;
+          const expired = await ordersService.expireSingleOrder(orderId);
+          return { expired };
         } else if (job.name === 'process') {
           const orderId = job.data.orderId;
           await ordersService.processOrder(orderId);
@@ -63,13 +67,13 @@ export const scheduleOrderExpiry = async (queue: Queue): Promise<void> => {
     await queue.removeRepeatableByKey(job.key);
   }
 
-  // Schedule order expiry check every 5 minutes
+  // Schedule order expiry check every 5 minutes (Fallback)
   await queue.add(
     'expire',
     {},
     {
       repeat: {
-        every: 300000, // 5 minutes
+        every: 300000,
       },
       removeOnComplete: 50,
       removeOnFail: 50,
@@ -77,6 +81,30 @@ export const scheduleOrderExpiry = async (queue: Queue): Promise<void> => {
   );
 
   logger.info('Order worker scheduled');
+};
+
+/**
+ * Schedule a delayed expiry job for a specific order (Exact Timing)
+ */
+export const scheduleSingleOrderExpiry = async (
+  queue: Queue,
+  orderId: string,
+  delayMs: number
+): Promise<void> => {
+  await queue.add(
+    'expire_single',
+    { orderId },
+    {
+      delay: delayMs,
+      removeOnComplete: true,
+      removeOnFail: false, // Keep failed jobs for debugging
+      attempts: 3,         // Retry if DB is busy
+      backoff: {
+        type: 'exponential',
+        delay: 5000
+      }
+    }
+  );
 };
 
 /**

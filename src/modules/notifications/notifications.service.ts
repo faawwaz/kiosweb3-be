@@ -175,3 +175,38 @@ export const notifyVoucherReceived = async (
     logger.error({ error, userId }, 'Failed to send voucher notification');
   }
 };
+
+/**
+ * Notify user of order expiry
+ */
+export const notifyOrderExpired = async (order: Order & { user?: any }): Promise<void> => {
+  try {
+    // If user relation not passed, fetch it
+    let telegramId = order.user?.telegramId;
+    if (!telegramId) {
+      const user = await prisma.user.findUnique({ where: { id: order.userId } });
+      telegramId = user?.telegramId;
+    }
+
+    if (!telegramId) return;
+
+    const bot = getBot();
+    const shortId = order.midtransId ? order.midtransId.split('-')[1] : order.id.slice(0, 8);
+
+    const message =
+      `⚠️ **Order Kadaluarsa** ⚠️\n\n` +
+      `Maaf Kak, batas waktu pembayaran untuk Order #${shortId} telah habis (15 Menit).\n` +
+      `System otomatis membatalkan order ini.\n\n` +
+      `❌ **MOHON JANGAN TRANSFER!**\n` +
+      `Jika Kakak transfer sekarang, dana akan **nyangkut** dan butuh waktu lama untuk proses refund manual.\n\n` +
+      `👇 _Silakan buat order baru jika masih berminat._`;
+
+    await bot.sendMessage(parseInt(telegramId, 10), message, {
+      parse_mode: 'Markdown',
+    });
+
+    logger.info({ orderId: order.id }, 'Order expiry notification sent');
+  } catch (error) {
+    logger.error({ error, orderId: order.id }, 'Failed to send expiry notification');
+  }
+};
