@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Enums
+// ============================================
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PROCESSING
+  SUCCESS
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum ChainType {
+  EVM
+  SOLANA
+  SUI
+}
+
+enum PaymentMethod {
+  QRIS
+  VA
+}
+
+// ============================================
+// Identity & Auth
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String?  @unique
+  role      Role     @default(USER)
+  image     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Authentication
+  password         String?
+  googleId         String? @unique @map("google_id")
+  telegramId       String? @unique @map("telegram_id")
+  telegramUsername String? @map("telegram_username")
+
+  // Referral system
+  referralCode String  @unique @map("referral_code")
+  referredById String? @map("referred_by_id")
+  referredBy   User?   @relation("ReferredUser", fields: [referredById], references: [id])
+  referrals    User[]  @relation("ReferredUser")
+
+  // App relations
+  orders              Order[]
+  vouchers            Voucher[]
+  referralsAsReferrer Referral[] @relation("Referrer")
+  referralsAsReferee  Referral[] @relation("Referee")
+
+  @@index([telegramId])
+  @@index([email])
+  @@index([name]) // Added Index
+  @@index([referralCode])
+  @@map("users")
+}
+
+// ============================================
+// Dynamic Blockchain Config (Core Engine)
+// ============================================
+
+model Chain {
+  id   String    @id @default(uuid())
+  name String
+  slug String    @unique // e.g. "bsc", "eth", "base"
+  type ChainType @default(EVM)
+
+  // Config
+  rpcUrl      String
+  explorerUrl String // e.g. "https://bscscan.com"
+  chainId     Int? // EVM Chain ID (56)
+  extraConfig Json? // Future proof (For Solana WS, etc)
+
+  // Security (AES Encrypted Private Key)
+  encryptedPrivateKey String
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  tokens Token[]
+  // orders   Order[] // Relation later
+
+  @@map("chains")
+}
+
+model Token {
+  id     String @id @default(uuid())
+  symbol String // e.g. "USDT", "BNB"
+  name   String
+
+  chainId String @map("chain_id")
+  chain   Chain  @relation(fields: [chainId], references: [id])
+
+  isNative Boolean @default(false)
+  address  String? // Contract Address / Mint Address (Null if Native)
+  decimals Int     @default(18)
+
+  markupPercent Float   @default(5.0) @map("markup_percent")
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([chainId, symbol]) // Symbol must be unique per chain
+  @@map("tokens")
+}
+
+// ============================================
+// Business Logic Models
+// ============================================
+
+model Inventory {
+  id        String   @id @default(cuid())
+  chain     String // Legacy Slug referensi ke Chain.slug
+  symbol    String
+  balance   Decimal  @db.Decimal(36, 18)
+  reserved  Decimal  @default(0) @db.Decimal(36, 18)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([chain, symbol])
+  @@index([chain])
+  @@map("inventory")
+}
+
+model Order {
+  id     String @id @default(cuid())
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id])
+
+  chain         String // Legacy Slug referensi ke Chain.slug
+  symbol        String
+  amountIdr     Int     @map("amount_idr")
+  amountToken   Decimal @map("amount_token") @db.Decimal(36, 18)
+  markupPercent Int     @map("markup_percent")
+  walletAddress String  @map("wallet_address")
+  voucherId     String? @map("voucher_id")
+
+  status     OrderStatus @default(PENDING)
+  midtransId String?     @unique @map("midtrans_id")
+  paymentUrl String?     @map("payment_url")
+
+  // New Payment Fields
+  paymentMethod PaymentMethod? @map("payment_method")
+  feeIdr        Int            @default(0) @map("fee_idr")
+  totalPay      Int            @default(0) @map("total_pay")
+
+  txHash      String?   @map("tx_hash")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  paidAt      DateTime? @map("paid_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([userId])
+  @@index([status])
+  @@index([midtransId])
+  @@index([createdAt])
+  @@index([completedAt]) // Added Index for Analytics
+  @@index([chain]) // Added Index for GroupBy
+  @@map("orders")
+}
+
+model Voucher {
+  id     String  @id @default(cuid())
+  userId String? @map("user_id") // Optional: If null, it's a public promo code
+  user   User?   @relation(fields: [userId], references: [id])
+
+  code      String @unique
+  value     Int // Discount amount in IDR
+  minAmount Int    @default(0) @map("min_amount") // Min purchase requirement
+
+  // Usage Controls
+  maxUsage   Int     @default(1) @map("max_usage") // 1 for single use, >1 for bulk
+  usageCount Int     @default(0) @map("usage_count")
+  isActive   Boolean @default(true) @map("is_active")
+
+  usedAt DateTime? @map("used_at") // Deprecated for bulk usage, use logs/usageCount instead if simple
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  expiresAt DateTime? @map("expires_at")
+
+  @@index([userId])
+  @@index([code])
+  @@map("vouchers")
+}
+
+model Referral {
+  id         String @id @default(cuid())
+  referrerId String @map("referrer_id")
+  referrer   User   @relation("Referrer", fields: [referrerId], references: [id])
+  refereeId  String @unique @map("referee_id")
+  referee    User   @relation("Referee", fields: [refereeId], references: [id])
+
+  isValid     Boolean   @default(false) @map("is_valid")
+  rewardGiven Boolean   @default(false) @map("reward_given")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  validatedAt DateTime? @map("validated_at")
+
+  @@index([referrerId])
+  @@index([isValid])
+  @@map("referrals")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String   @map("admin_id") // Who did it?
+  action    String // e.g. "WITHDRAW_TREASURY", "RETRY_ORDER"
+  resource  String? // Target ID (OrderId, VoucherId)
+  details   Json? // Snapshot of data
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([adminId])
+  @@index([action])
+  @@map("audit_logs")
+}

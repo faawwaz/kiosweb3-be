@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(claude mcp add:*)",
+      "WebFetch(domain:authjs.dev)",
+      "Bash(claude mcp list:*)",
+      "Bash(dir:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls -la \"D:\\\\Project\\\\eceranstore\\\\src\\\\bot\"\" 2>/dev/null || echo \"Directory not found \")"
+    ]
+  }
+}
