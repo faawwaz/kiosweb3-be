@@ -4,7 +4,7 @@ import { logger } from '../libs/logger.js';
 
 let transporter: nodemailer.Transporter;
 
-export const initMailer = () => {
+export const initMailer = async () => {
     if (env.SMTP_USER && env.SMTP_PASS) {
         transporter = nodemailer.createTransport({
             host: env.SMTP_HOST,
@@ -14,9 +14,19 @@ export const initMailer = () => {
                 user: env.SMTP_USER,
                 pass: env.SMTP_PASS,
             },
+            // Add timeouts to fail fast
+            connectionTimeout: 10000, 
+            greetingTimeout: 10000,
+            socketTimeout: 10000
         });
 
-        logger.info('SMTP Mailer initialized');
+        try {
+            await transporter.verify();
+            logger.info('SMTP Mailer connection verified (Ready to send)');
+        } catch (error) {
+            logger.error({ error }, '❌ SMTP Mailer Connection FAILED');
+            // We don't throw here to prevent crash, but logs will be very clear
+        }
     } else {
         logger.warn('SMTP credentials not provided. Mailer disabled (OTP will be logged only).');
     }

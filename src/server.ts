@@ -44,7 +44,7 @@ const startServer = async () => {
     await startInventoryMonitor();
 
     // Initialize Mailer
-    initMailer();
+    await initMailer();
 
     // Start Binance WSS (Realtime Pricing)
     // Dynamic import to avoid circular dependency issues if any
