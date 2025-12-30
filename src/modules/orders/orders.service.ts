@@ -604,18 +604,15 @@ export const expirePendingOrders = async (
       status: 'PENDING',
       createdAt: { lt: cutoff },
     },
-    include: { user: true } // Fetch user for notification
+    include: { user: true }
   });
 
   let expiredCount = 0;
-  let recoveredCount = 0;
 
   for (const order of pendingOrders) {
     try {
       if (await expireSingleOrder(order.id, order)) {
         expiredCount++;
-      } else {
-        // We can track skipped/recovered if necessary
       }
     } catch (error) {
       logger.error({ error, orderId: order.id }, 'Failed to expire order');
