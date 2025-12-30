@@ -29,7 +29,7 @@ export const initBot = async (): Promise<void> => {
   }
 
   bot = new TelegramBot(env.TELEGRAM_BOT_TOKEN, {
-    polling: env.NODE_ENV === 'development',
+    polling: true, // Force polling even in production (Webhook not implemented yet)
   });
 
   // Set Bot Commands
