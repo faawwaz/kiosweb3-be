@@ -621,9 +621,8 @@ export const expirePendingOrders = async (
       logger.error({ error, orderId: order.id }, 'Failed to expire order');
     }
   }
-}
 
-return expiredCount;
+  return expiredCount;
 };
 
 /**
