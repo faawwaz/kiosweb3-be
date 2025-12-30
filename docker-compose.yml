@@ -3,12 +3,12 @@ version: '3.8'
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: eceranstore-postgres
+    container_name: kiosweb3-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: eceranstore
+      POSTGRES_DB: kiosweb3
     ports:
       - "5432:5432"
     volumes:
@@ -21,7 +21,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: eceranstore-redis
+    container_name: kiosweb3-redis
     restart: unless-stopped
     ports:
       - "6379:6379"

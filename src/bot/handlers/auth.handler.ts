@@ -53,7 +53,7 @@ export const setupAuthHandler = (bot: TelegramBot): void => {
 
             await updateState(telegramId, { step: 'awaiting_link_code' });
             const linkMsg = `🔗 **Sambung Akun Web** (Langkah 1/2)\n\n` +
-                `1. Login ke Website EceranStore.\n` +
+                `1. Login ke Website KiosWeb3.\n` +
                 `2. Buka Profil → Generate Telegram Code.\n` +
                 `3. Masukkan kode 6 digit tersebut di sini:`;
             await bot.sendMessage(chatId, linkMsg, { parse_mode: 'Markdown' });

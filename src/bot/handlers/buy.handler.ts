@@ -423,7 +423,7 @@ export const setupCheckStatusHandler = (bot: TelegramBot): void => {
 
       const method = pendingOrder.paymentMethod || 'QRIS';
       const createdTime = new Date(pendingOrder.createdAt).getTime();
-      const expiryTime = createdTime + (60 * 60 * 1000);
+      const expiryTime = createdTime + (15 * 60 * 1000); // 15 Minutes
       const remainingMs = expiryTime - Date.now();
 
       if (remainingMs <= 0) {
@@ -706,11 +706,11 @@ async function processPaymentGeneration(
 
     const inlineKb = checkPaymentInlineKeyboardWithCancel(orderId);
 
-    // Calculate Expiry (1 Hour)
-    const expiryDate = new Date(Date.now() + 60 * 60 * 1000);
+    // Calculate Expiry (15 Minutes)
+    const expiryDate = new Date(Date.now() + 15 * 60 * 1000);
     const expiryStr = expiryDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    const expiryWarning = `\n\n⏳ **Batas Waktu:** ${expiryStr} WIB (1 Jam)\n⚠️ **PENTING:** Jika lewat dari jam tersebut, mohon JANGAN TRANSFER karena pesanan akan otomatis dibatalkan sistem.`;
+    const expiryWarning = `\n\n⏳ **Batas Waktu:** ${expiryStr} WIB (15 Menit)\n⚠️ **PENTING:** Jika lewat dari jam tersebut, mohon JANGAN TRANSFER karena pesanan akan otomatis dibatalkan sistem.`;
 
     if (method === 'QRIS' && result.qrImage) {
       const isUrl = result.qrImage.startsWith('http');

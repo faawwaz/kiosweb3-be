@@ -166,7 +166,7 @@ router.post('/:id/pay', authMiddleware, async (req: Request, res: Response) => {
       qrImage: result.qrImage,
       fee: result.fee,
       totalPay: result.total,
-      expiryTime: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      expiryTime: new Date(Date.now() + 15 * 60 * 1000).toISOString()
     });
 
   } catch (error) {

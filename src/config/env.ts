@@ -1,6 +1,12 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
+// Load environment variables with priority:
+// 1. .env.production (Production / Main Branch)
+// 2. .env.local (Development / Local Overrides)
+// 3. .env (Defaults)
+dotenv.config({ path: '.env.production' });
+dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 const envSchema = z.object({
@@ -56,7 +62,7 @@ const envSchema = z.object({
   SMTP_PORT: z.string().default('587').transform(Number),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
-  SMTP_FROM: z.string().default('EceranStore <no-reply@eceran.store>'),
+  SMTP_FROM: z.string().default('KiosWeb3 <no-reply@kiosweb3.com>'),
 
   // Monitoring (Sentry)
   SENTRY_DSN: z.string().optional(), // Optional for local dev/build

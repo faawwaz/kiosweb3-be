@@ -56,9 +56,9 @@ const getCustomerEmail = async (userId: string): Promise<string> => {
       where: { id: userId },
       select: { email: true, name: true }
     });
-    return user?.email || 'customer@eceranstore.com';
+    return user?.email || 'customer@kiosweb3.com';
   } catch {
-    return 'customer@eceranstore.com';
+    return 'customer@kiosweb3.com';
   }
 };
 
@@ -193,7 +193,7 @@ export const createSnapBankPayment = async (order: Order): Promise<PaymentResult
       last_name: customerName.split(' ').slice(1).join(' ') || '',
       email: customerEmail,
     },
-    expiry: { unit: 'minutes', duration: 60 }
+    expiry: { unit: 'minutes', duration: midtransConfig.paymentExpiryMinutes }
   };
 
   try {

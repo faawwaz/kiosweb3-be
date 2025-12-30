@@ -581,7 +581,7 @@ export const cancelOrder = async (orderId: string): Promise<void> => {
  * 4. Only expire if no payment or payment truly failed/expired
  */
 export const expirePendingOrders = async (
-  olderThanMinutes: number = 60
+  olderThanMinutes: number = 15
 ): Promise<number> => {
   const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
 

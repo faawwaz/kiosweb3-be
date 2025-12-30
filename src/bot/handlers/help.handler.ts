@@ -7,10 +7,9 @@ export const setupHelpHandler = (bot: TelegramBot): void => {
     // Unified Logic for Help Message
     const sendHelpMessage = async (chatId: number) => {
         const message =
-            `_Jam Operasional Admin: 09:00 - 21:00 WIB_\n\n` +
             `📚 **PUSAT BANTUAN & EDUKASI**\n\n` +
 
-            `💡 **Apa itu EceranStore?**\n` +
+            `💡 **Apa itu KiosWeb3?**\n` +
             `Kami adalah platform yang memudahkan kamu beli aset crypto (BNB, ETH, MATIC) dengan nominal kecil (mulai Rp 10.000) langsung masuk ke Wallet Pribadi kamu.\n\n` +
 
             `❓ **FAQ (Tanya Jawab)**\n\n` +

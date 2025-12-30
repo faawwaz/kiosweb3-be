@@ -40,9 +40,9 @@ export const setupReferralHandler = (bot: TelegramBot): void => {
       if (!cachedBotUsername) {
         try {
           const botInfo = await bot.getMe();
-          cachedBotUsername = botInfo.username || 'EceranStoreBot';
+          cachedBotUsername = botInfo.username || 'KiosWeb3Bot';
         } catch (e) {
-          cachedBotUsername = 'EceranStoreBot'; // Fallback
+          cachedBotUsername = 'KiosWeb3Bot'; // Fallback
         }
       }
 

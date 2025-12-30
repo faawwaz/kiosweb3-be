@@ -13,7 +13,7 @@ export const orderWorker = (connection: { host: string; port: number }): Worker 
 
       try {
         if (job.name === 'expire') {
-          const expiredCount = await ordersService.expirePendingOrders(60);
+          const expiredCount = await ordersService.expirePendingOrders(15);
           return { expiredCount };
         } else if (job.name === 'process') {
           const orderId = job.data.orderId;

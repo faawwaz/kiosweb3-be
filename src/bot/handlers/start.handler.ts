@@ -21,7 +21,7 @@ export const setupStartHandler = (bot: TelegramBot): void => {
         await resetState(telegramId);
 
         const welcomeBack = `👋 *Halo Kak ${(user as any).name || 'User'}!* \n\n` +
-          `Selamat datang kembali di EceranStore. Mau transaksi apa hari ini?\n\n` +
+          `Selamat datang kembali di KiosWeb3. Mau transaksi apa hari ini?\n\n` +
           `👇 **Silakan pilih menu di bawah:**\n\n` +
           `ℹ️ **Bingung cara pakainya?**\nKlik /help untuk melihat panduan lengkap fungsi tombol di dashboard ini.`;
 
@@ -38,7 +38,7 @@ export const setupStartHandler = (bot: TelegramBot): void => {
           await updateState(telegramId, { regReferral: referralCode });
         }
 
-        const welcomeMsg = `👋 **Selamat Datang di EceranStore!**\n\n` +
+        const welcomeMsg = `👋 **Selamat Datang di KiosWeb3!**\n\n` +
           `🤖 Bot ini adalah solusi termudah buat Kakak yang mau beli aset crypto secara **Eceran** (Nominal Kecil) tanpa ribet daftar exchange!\n\n` +
           `🚀 **Fitur Utama:**\n` +
           `• Beli mulai Rp 10.000\n` +
