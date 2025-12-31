@@ -348,13 +348,13 @@ function generateSecureOTP(): string {
 function maskEmail(email: string): string {
     const [username, domain] = email.split('@');
 
-    if (!domain) return '***@***';
+    if (!domain) return '...@...';
 
     if (username.length <= 2) {
-        return `${username[0] || '*'}***@${domain}`;
+        return `${username[0] || '.'}...@${domain}`;
     } else if (username.length <= 4) {
-        return `${username.slice(0, 2)}***@${domain}`;
+        return `${username.slice(0, 2)}...@${domain}`;
     } else {
-        return `${username.slice(0, 2)}***${username.slice(-1)}@${domain}`;
+        return `${username.slice(0, 2)}...${username.slice(-1)}@${domain}`;
     }
 }

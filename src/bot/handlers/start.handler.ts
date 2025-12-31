@@ -45,7 +45,7 @@ export const setupStartHandler = (bot: TelegramBot): void => {
           `• Fee Transaksi Murah & Transparan\n` +
           `• Support QRIS & Virtual Account\n` +
           `• Kirim langsung ke Wallet Pribadi (Metamask/TrustWallet)\n\n` +
-          `🛡️ _Aman & Terpercaya sejak 2024_\n\n` +
+          `🛡️ _Aman & Terpercaya sejak 2025_\n\n` +
           `👇 **Langkah Pertama:**\nSilakan pilih salah satu menu di bawah ini untuk memulai akses:`;
 
         await bot.sendMessage(chatId, welcomeMsg, {

@@ -10,7 +10,7 @@ dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
   PORT: z.string().default('3000').transform(Number),
 
   // Database
@@ -33,6 +33,8 @@ const envSchema = z.object({
   MIDTRANS_CLIENT_KEY: z.string(),
   MIDTRANS_IS_PRODUCTION: z.string().default('false').transform((v) => v === 'true'),
   MIDTRANS_MERCHANT_ID: z.string(),
+  MIDTRANS_IRIS_API_KEY: z.string().optional(),
+  MIDTRANS_IRIS_MERCHANT_KEY: z.string().optional(),
 
   // Hot Wallet Private Keys
   HOT_WALLET_PRIVATE_KEY_BSC: z.string().optional(),
