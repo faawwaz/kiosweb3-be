@@ -1,7 +1,9 @@
 import jwt from 'jsonwebtoken';
 import { logger } from '../libs/logger.js';
+import { env } from '../config/env.js';
 
-const JWT_SECRET = process.env.AUTH_SECRET || 'fallback-secret-pls-change';
+// Use validated env - no fallback, app will crash if AUTH_SECRET missing (validated in env.ts)
+const JWT_SECRET = env.AUTH_SECRET;
 const TOKEN_EXPIRY = '7d';
 
 export interface JwtPayload {

@@ -11,6 +11,76 @@ import * as vouchersService from '../vouchers/vouchers.service.js';
 
 const router = Router();
 
+// ==========================================
+// 🛡️ SECURITY: Input Validation Helpers
+// ==========================================
+
+/**
+ * Validate RPC URL to prevent SSRF attacks
+ * - Must be HTTPS (except localhost for dev)
+ * - Cannot be internal/private IPs
+ * - Must be a valid URL format
+ */
+const validateRpcUrl = (url: string): { valid: boolean; error?: string } => {
+    try {
+        const parsed = new URL(url);
+
+        // Must be http or https
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return { valid: false, error: 'RPC URL must use HTTP or HTTPS protocol' };
+        }
+
+        // Block internal/private IP ranges (SSRF prevention)
+        const hostname = parsed.hostname.toLowerCase();
+        const blockedPatterns = [
+            /^localhost$/i,
+            /^127\./,
+            /^10\./,
+            /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+            /^192\.168\./,
+            /^169\.254\./,
+            /^0\./,
+            /^::1$/,
+            /^fc00:/i,
+            /^fe80:/i,
+            /\.local$/i,
+            /\.internal$/i,
+            /\.corp$/i,
+            /\.lan$/i,
+        ];
+
+        for (const pattern of blockedPatterns) {
+            if (pattern.test(hostname)) {
+                return { valid: false, error: 'RPC URL cannot point to internal/private networks' };
+            }
+        }
+
+        // Must use HTTPS in production (allow HTTP for known testnets only)
+        const allowedHttpHosts = ['localhost', '127.0.0.1'];
+        if (parsed.protocol === 'http:' && !allowedHttpHosts.includes(hostname)) {
+            return { valid: false, error: 'RPC URL must use HTTPS for security' };
+        }
+
+        return { valid: true };
+    } catch {
+        return { valid: false, error: 'Invalid URL format' };
+    }
+};
+
+/**
+ * Validate chain slug format
+ */
+const validateSlug = (slug: string): boolean => {
+    return /^[a-z0-9-]+$/.test(slug) && slug.length >= 2 && slug.length <= 20;
+};
+
+/**
+ * Validate chain name
+ */
+const validateName = (name: string): boolean => {
+    return typeof name === 'string' && name.length >= 2 && name.length <= 50;
+};
+
 // Apply Auth & Admin Check to ALL routes here
 router.use(authMiddleware, adminMiddleware);
 
@@ -150,35 +220,7 @@ router.post('/orders/:id/mark-success', async (req: Request, res: Response) => {
 });
 
 // ==========================================
-// 🏦 TREASURY MANAGEMENT
-// ==========================================
-
-/**
- * POST /api/admin/treasury/withdraw
- * Securely withdraw funds from Hot Wallet to Cold Wallet
- */
-router.post('/treasury/withdraw', async (req: Request, res: Response) => {
-    try {
-        const { chain, toAddress, amount } = req.body;
-        if (!chain || !toAddress || !amount) {
-            return res.status(400).json({ error: 'Chain, toAddress, and amount required' });
-        }
-
-        const adminId = (req as any).user.id;
-        const txHash = await adminService.withdrawTreasury(chain, toAddress, Number(amount), adminId, req.ip);
-
-        res.json({
-            message: 'Withdrawal successful',
-            txHash
-        });
-    } catch (error: any) {
-        logger.error({ error }, 'Treasury Withdraw Failed');
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ==========================================
-// CHAIN & TOKEN MANAGEMENT (Unchanged)
+// CHAIN & TOKEN MANAGEMENT
 // ==========================================
 
 /**
@@ -211,19 +253,53 @@ router.post('/chains', async (req: Request, res: Response) => {
             privateKey, extraConfig
         } = req.body;
 
+        // Validate required fields
         if (!name || !slug || !rpcUrl || !privateKey) {
-            return res.status(400).json({ error: 'Missing required fields' });
+            return res.status(400).json({ error: 'Missing required fields: name, slug, rpcUrl, privateKey' });
         }
 
-        const existing = await prisma.chain.findUnique({ where: { slug } });
+        // Validate name format
+        if (!validateName(name)) {
+            return res.status(400).json({ error: 'Name must be 2-50 characters' });
+        }
+
+        // Validate slug format (lowercase alphanumeric with hyphens)
+        if (!validateSlug(slug.toLowerCase())) {
+            return res.status(400).json({ error: 'Slug must be 2-20 lowercase alphanumeric characters with hyphens only' });
+        }
+
+        // Validate RPC URL (SSRF prevention)
+        const rpcValidation = validateRpcUrl(rpcUrl);
+        if (!rpcValidation.valid) {
+            return res.status(400).json({ error: rpcValidation.error });
+        }
+
+        // Validate explorer URL if provided
+        if (explorerUrl) {
+            const explorerValidation = validateRpcUrl(explorerUrl);
+            if (!explorerValidation.valid) {
+                return res.status(400).json({ error: `Explorer URL: ${explorerValidation.error}` });
+            }
+        }
+
+        // Validate private key format (basic hex check)
+        const pkClean = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+        if (!/^[a-fA-F0-9]{64}$/.test(pkClean)) {
+            return res.status(400).json({ error: 'Invalid private key format' });
+        }
+
+        const existing = await prisma.chain.findUnique({ where: { slug: slug.toLowerCase() } });
         if (existing) return res.status(400).json({ error: 'Chain Slug already exists' });
 
         const encryptedKey = await WalletManager.encrypt(privateKey);
 
         const newChain = await prisma.chain.create({
             data: {
-                name, slug, type: (type as ChainType) || 'EVM',
-                rpcUrl, explorerUrl: explorerUrl || '',
+                name: name.trim(),
+                slug: slug.toLowerCase().trim(),
+                type: (type as ChainType) || 'EVM',
+                rpcUrl: rpcUrl.trim(),
+                explorerUrl: explorerUrl?.trim() || '',
                 chainId: chainId ? Number(chainId) : null,
                 encryptedPrivateKey: encryptedKey,
                 extraConfig: extraConfig || {},
@@ -231,7 +307,7 @@ router.post('/chains', async (req: Request, res: Response) => {
             }
         });
 
-        logger.info('🔄 Admin added chain. Refreshing Engine...');
+        logger.info({ chainId: newChain.id, slug: newChain.slug }, 'Admin added chain. Refreshing Engine...');
         await blockchainManager.refresh();
 
         return res.status(201).json({ message: 'Chain created successfully', id: newChain.id });
@@ -250,9 +326,29 @@ router.patch('/chains/:id', async (req: Request, res: Response) => {
         const { id } = req.params;
         const { isActive, rpcUrl, explorerUrl } = req.body;
 
+        // Validate RPC URL if provided (SSRF prevention)
+        if (rpcUrl) {
+            const rpcValidation = validateRpcUrl(rpcUrl);
+            if (!rpcValidation.valid) {
+                return res.status(400).json({ error: rpcValidation.error });
+            }
+        }
+
+        // Validate explorer URL if provided
+        if (explorerUrl) {
+            const explorerValidation = validateRpcUrl(explorerUrl);
+            if (!explorerValidation.valid) {
+                return res.status(400).json({ error: `Explorer URL: ${explorerValidation.error}` });
+            }
+        }
+
         await prisma.chain.update({
             where: { id },
-            data: { isActive, rpcUrl, explorerUrl }
+            data: {
+                isActive,
+                rpcUrl: rpcUrl?.trim(),
+                explorerUrl: explorerUrl?.trim()
+            }
         });
 
         await blockchainManager.refresh();

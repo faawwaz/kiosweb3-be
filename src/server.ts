@@ -15,14 +15,18 @@ const startServer = async () => {
   try {
     // Initialize Sentry (First thing!)
     if (env.SENTRY_DSN) {
+      // Production: Low sample rate to save quota and reduce latency
+      // Development: Higher rate for debugging
+      const isProduction = env.NODE_ENV === 'production';
+
       Sentry.init({
         dsn: env.SENTRY_DSN,
         environment: env.SENTRY_ENVIRONMENT,
         integrations: [nodeProfilingIntegration()],
-        tracesSampleRate: 1.0, // Capture 100% of transactions for now (adjust for high traffic)
-        profilesSampleRate: 1.0,
+        tracesSampleRate: isProduction ? 0.1 : 1.0, // 10% in prod, 100% in dev
+        profilesSampleRate: isProduction ? 0.1 : 1.0,
       });
-      logger.info('Sentry Monitoring initialized');
+      logger.info({ sampleRate: isProduction ? '10%' : '100%' }, 'Sentry Monitoring initialized');
     }
 
     // Test database connection

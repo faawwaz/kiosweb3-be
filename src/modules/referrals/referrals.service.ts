@@ -4,6 +4,7 @@ import { logger } from '../../libs/logger.js';
 import { authConfig } from '../../config/auth.js';
 import * as vouchersService from '../vouchers/vouchers.service.js';
 import * as notificationsService from '../notifications/notifications.service.js';
+import { generateVoucherCode } from '../../utils/crypto.js';
 
 export interface ReferralStats {
   total: number;
@@ -150,8 +151,8 @@ export const grantReferralReward = async (referralId: string): Promise<void> => 
   }
 
   try {
-    // Create voucher for referrer
-    const code = `REF-${referral.referrerId.slice(-4)}-${Date.now().toString().slice(-4)}`;
+    // Create voucher for referrer with unique code using nanoid
+    const code = `REF-${generateVoucherCode()}`;
 
     const voucher = await vouchersService.createVoucher({
       code,
@@ -171,7 +172,7 @@ export const grantReferralReward = async (referralId: string): Promise<void> => 
     });
 
     if (validCount > 0 && validCount % 20 === 0) {
-      const bonusCode = `BONUS-${referral.referrerId.slice(-4)}-${validCount}`;
+      const bonusCode = `BONUS-${generateVoucherCode()}`;
 
       try {
         const bonusVoucher = await vouchersService.createVoucher({

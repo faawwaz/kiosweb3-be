@@ -22,8 +22,14 @@ let metrics = {
     updates: 0,
     drops: 0,
     errors: 0,
-    maxLag: 0
+    maxLag: 0,
+    backpressureDrops: 0
 };
+
+// Backpressure control
+let isProcessing = false;
+const MAX_QUEUE_SIZE = 100;
+let pendingMessages: WebSocket.Data[] = [];
 
 /**
  * Load Supported Tokens from DB to Memory
@@ -76,10 +82,19 @@ const connect = () => {
 
     ws.on('message', (data: WebSocket.Data) => {
         lastMessageTime = Date.now();
-        try {
-            const tickers = JSON.parse(data.toString());
-            if (Array.isArray(tickers)) processTickers(tickers);
-        } catch (error) { metrics.errors++; }
+
+        // Backpressure handling: queue messages if processing
+        if (isProcessing) {
+            if (pendingMessages.length >= MAX_QUEUE_SIZE) {
+                // Drop oldest messages when queue is full
+                pendingMessages.shift();
+                metrics.backpressureDrops++;
+            }
+            pendingMessages.push(data);
+            return;
+        }
+
+        processMessage(data);
     });
 
     ws.on('error', (err) => {
@@ -99,15 +114,42 @@ const connect = () => {
     });
 };
 
+/**
+ * Process a single message with backpressure control
+ */
+const processMessage = async (data: WebSocket.Data) => {
+    isProcessing = true;
+    try {
+        const tickers = JSON.parse(data.toString());
+        if (Array.isArray(tickers)) await processTickers(tickers);
+    } catch (error) {
+        metrics.errors++;
+    } finally {
+        isProcessing = false;
+
+        // Process next queued message if any
+        if (pendingMessages.length > 0) {
+            const nextMessage = pendingMessages.shift();
+            if (nextMessage) {
+                // Use setImmediate to prevent stack overflow
+                setImmediate(() => processMessage(nextMessage));
+            }
+        }
+    }
+};
+
 const startMetricsLogger = () => {
     if (metricsTimer) clearInterval(metricsTimer);
     metricsTimer = setInterval(() => {
         // Only log if something happened
-        if (metrics.updates > 0 || metrics.errors > 0 || metrics.drops > 0) {
-            logger.info({ ...metrics }, 'WS Metrics (1m)');
+        if (metrics.updates > 0 || metrics.errors > 0 || metrics.drops > 0 || metrics.backpressureDrops > 0) {
+            logger.info({
+                ...metrics,
+                queueSize: pendingMessages.length
+            }, 'WS Metrics (1m)');
         }
         // Reset counters
-        metrics = { updates: 0, drops: 0, errors: 0, maxLag: 0 };
+        metrics = { updates: 0, drops: 0, errors: 0, maxLag: 0, backpressureDrops: 0 };
     }, METRICS_INTERVAL);
 };
 

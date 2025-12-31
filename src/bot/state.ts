@@ -171,6 +171,7 @@ export const updateStateAtomic = async (
 /**
  * Update conversation state with lock (Issue #9)
  * More reliable than Lua for complex updates
+ * Throws error if lock cannot be acquired to prevent race conditions
  */
 export const updateState = async (
   telegramId: string,
@@ -180,16 +181,21 @@ export const updateState = async (
   const lockKey = `${LOCK_PREFIX}${telegramId}`;
   const lockValue = crypto.randomUUID();
 
-  // Try to acquire lock
-  const acquired = await redis.set(lockKey, lockValue, 'EX', LOCK_TTL, 'NX');
+  // Try to acquire lock with retries
+  let acquired = await redis.set(lockKey, lockValue, 'EX', LOCK_TTL, 'NX');
 
   if (!acquired) {
-    // Wait briefly and retry once
-    await new Promise(r => setTimeout(r, 100));
-    const retryAcquired = await redis.set(lockKey, lockValue, 'EX', LOCK_TTL, 'NX');
-    if (!retryAcquired) {
-      // Proceed anyway but log warning
-      logger.warn({ telegramId }, 'State update lock contention');
+    // Wait briefly and retry up to 3 times
+    for (let i = 0; i < 3; i++) {
+      await new Promise(r => setTimeout(r, 50 * (i + 1))); // 50ms, 100ms, 150ms
+      acquired = await redis.set(lockKey, lockValue, 'EX', LOCK_TTL, 'NX');
+      if (acquired) break;
+    }
+
+    if (!acquired) {
+      // Critical: Don't proceed without lock - throw error to prevent race condition
+      logger.warn({ telegramId }, 'State update lock contention - operation rejected');
+      throw new Error('Operation in progress, please wait');
     }
   }
 
@@ -199,11 +205,15 @@ export const updateState = async (
     await setState(telegramId, newState);
     return newState;
   } finally {
-    // Release lock safely
-    const currentLock = await redis.get(lockKey);
-    if (currentLock === lockValue) {
-      await redis.del(lockKey);
-    }
+    // Release lock safely using Lua for atomicity
+    const luaScript = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    await redis.eval(luaScript, 1, lockKey, lockValue);
   }
 };
 

@@ -33,7 +33,7 @@ export const orderWorker = (connection: { host: string; port: number }): Worker 
     },
     {
       connection,
-      concurrency: 20, // Process multiple orders in parallel
+      concurrency: 5, // Limited concurrency to prevent race conditions with blockchain locks
     }
   );
 

@@ -2,9 +2,6 @@ import { prisma } from '../../libs/prisma.js';
 import { logger } from '../../libs/logger.js';
 import * as ordersService from '../orders/orders.service.js';
 import * as inventoryService from '../inventory/inventory.service.js';
-import * as blockchainService from '../blockchain/blockchain.service.js';
-import { Decimal } from '@prisma/client/runtime/library.js';
-
 import { redis } from '../../libs/redis.js';
 
 const DASHBOARD_CACHE_KEY = 'admin:dashboard:stats';
@@ -16,7 +13,7 @@ export const invalidateDashboardCache = async (): Promise<void> => {
     logger.debug('Dashboard cache invalidated');
 };
 
-// --- STATS (CACHED) ---
+// --- STATS (CACHED & OPTIMIZED) ---
 export const getDashboardStats = async (forceRefresh = false) => {
     // Option to force refresh (e.g., after admin action)
     if (!forceRefresh) {
@@ -24,31 +21,51 @@ export const getDashboardStats = async (forceRefresh = false) => {
         if (cached) return JSON.parse(cached);
     }
 
-    // Heavy Computation
-    const [totalOrders, successOrders, failedOrders, pendingOrders] = await Promise.all([
-        prisma.order.count(),
-        prisma.order.count({ where: { status: 'SUCCESS' } }),
-        prisma.order.count({ where: { status: 'FAILED' } }),
-        prisma.order.count({ where: { status: 'PENDING' } })
+    // OPTIMIZED: Only 3 queries instead of 7
+    // 1. Single groupBy for all status counts
+    // 2. Aggregate for revenue
+    // 3. GroupBy for chain popularity
+    const [byStatus, revenue, byChain] = await Promise.all([
+        // Query 1: Get all counts by status in single query
+        prisma.order.groupBy({
+            by: ['status'],
+            _count: { _all: true }
+        }),
+        // Query 2: Revenue aggregate
+        prisma.order.aggregate({
+            where: { status: 'SUCCESS' },
+            _sum: { amountIdr: true }
+        }),
+        // Query 3: Chain popularity
+        prisma.order.groupBy({
+            by: ['chain'],
+            _count: { _all: true },
+            where: { status: 'SUCCESS' }
+        })
     ]);
 
-    const revenue = await prisma.order.aggregate({
-        where: { status: 'SUCCESS' },
-        _sum: { amountIdr: true }
-    });
+    // Calculate totals from groupBy result
+    let totalOrders = 0;
+    let successOrders = 0;
+    let failedOrders = 0;
+    let pendingOrders = 0;
 
-    // Group by status
-    const byStatus = await prisma.order.groupBy({
-        by: ['status'],
-        _count: true
-    });
+    for (const row of byStatus) {
+        const count = row._count._all;
+        totalOrders += count;
 
-    // Group by Chain (Popularity)
-    const byChain = await prisma.order.groupBy({
-        by: ['chain'],
-        _count: true,
-        where: { status: 'SUCCESS' }
-    });
+        switch (row.status) {
+            case 'SUCCESS':
+                successOrders = count;
+                break;
+            case 'FAILED':
+                failedOrders = count;
+                break;
+            case 'PENDING':
+                pendingOrders = count;
+                break;
+        }
+    }
 
     const result = {
         overview: {
@@ -60,8 +77,8 @@ export const getDashboardStats = async (forceRefresh = false) => {
             failedOrders
         },
         breakdown: {
-            status: byStatus,
-            chain: byChain
+            status: byStatus.map(s => ({ status: s.status, _count: s._count._all })),
+            chain: byChain.map(c => ({ chain: c.chain, _count: c._count._all }))
         },
         calculatedAt: new Date().toISOString(),
         cacheExpiresIn: DASHBOARD_CACHE_TTL
@@ -193,15 +210,4 @@ export const markOrderSuccess = async (orderId: string, txHash: string, adminId:
     logger.info({ orderId, adminId }, 'Order manually marked as SUCCESS');
 };
 
-// --- TREASURY ---
-export const withdrawTreasury = async (chain: string, toAddress: string, amount: number, adminId: string, ip?: string): Promise<string> => {
-    if (!blockchainService.isValidAddress(toAddress)) throw new Error('Invalid address');
-
-    const amountDec = new Decimal(amount);
-    const txHash = await blockchainService.sendNativeToken(chain, toAddress, amountDec);
-
-    await logAudit(adminId, 'WITHDRAW_TREASURY', chain, { toAddress, amount, txHash }, ip);
-    logger.warn({ chain, toAddress, amount, txHash, adminId }, 'Treasury Withdrawal Executed');
-
-    return txHash;
-};
+// Treasury withdrawal removed - manual wallet management only for security

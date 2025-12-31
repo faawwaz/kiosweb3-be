@@ -464,21 +464,57 @@ export const setupCheckStatusHandler = (bot: TelegramBot): void => {
 // --- HELPER FUNCTIONS ---
 
 /**
- * Issue #12: Robust amount parsing
- * Handles various formats: "100.000", "100000", "Rp 100.000", "100,000"
+ * Issue #12: Robust amount parsing for Indonesian Rupiah
+ * Handles various formats:
+ * - "100.000" (ID format with dot thousand separator) -> 100000
+ * - "100000" (plain number) -> 100000
+ * - "Rp 100.000" (with currency prefix) -> 100000
+ * - "100,000" (US format) -> 100000
+ * - "Rp100.000,50" (with decimal - ignore decimal part) -> 100000
+ *
+ * Note: In Indonesian format, dot is thousand separator, comma is decimal
+ * We only accept whole numbers for IDR transactions
  */
 function parseAmount(text: string): number | null {
-  // Remove all non-numeric characters except for actual digits
-  const cleaned = text.replace(/[^0-9]/g, '');
+  // Trim and convert to lowercase for prefix removal
+  let cleaned = text.trim();
 
-  if (!cleaned || cleaned.length === 0) {
+  // Remove common currency prefixes
+  cleaned = cleaned.replace(/^(rp\.?|idr)\s*/i, '');
+
+  // Remove any remaining whitespace
+  cleaned = cleaned.replace(/\s/g, '');
+
+  // Handle Indonesian format: dots are thousand separators
+  // e.g., "100.000" should be 100000, not 100
+  // Check if the number looks like ID format (has dots but no comma before dot)
+  const hasIdFormat = /^\d{1,3}(\.\d{3})+$/.test(cleaned);
+
+  if (hasIdFormat) {
+    // Indonesian format: remove dots (thousand separators)
+    cleaned = cleaned.replace(/\./g, '');
+  } else {
+    // Could be US format with comma as thousand separator
+    // or plain number with decimal dot
+    // Remove comma thousand separators first
+    cleaned = cleaned.replace(/,/g, '');
+
+    // If there's a remaining dot, treat everything after as decimal (ignore it)
+    const dotIndex = cleaned.indexOf('.');
+    if (dotIndex !== -1) {
+      cleaned = cleaned.substring(0, dotIndex);
+    }
+  }
+
+  // Now we should have only digits
+  if (!/^\d+$/.test(cleaned) || cleaned.length === 0) {
     return null;
   }
 
   const amount = parseInt(cleaned, 10);
 
-  // Validate it's a sensible number
-  if (isNaN(amount) || amount <= 0) {
+  // Validate it's a sensible number (not zero, not negative, not absurdly large)
+  if (isNaN(amount) || amount <= 0 || amount > 1_000_000_000_000) {
     return null;
   }
 

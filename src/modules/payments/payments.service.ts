@@ -47,34 +47,49 @@ const generateQrCodeImage = async (qrString: string): Promise<string> => {
   }
 };
 
+interface CustomerDetails {
+  email?: string;
+  name: string;
+}
+
 /**
- * Get customer email for payment (falls back to default if not found)
+ * Get customer details for payment
+ * Returns email only if user has one (don't use fake email to avoid wrong receipts)
  */
-const getCustomerEmail = async (userId: string): Promise<string> => {
+const getCustomerDetails = async (userId: string): Promise<CustomerDetails> => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { email: true, name: true }
     });
-    return user?.email || 'customer@kiosweb3.com';
+
+    return {
+      // Only return email if it's a real, valid email (not undefined/null)
+      email: user?.email && user.email.includes('@') ? user.email : undefined,
+      name: user?.name || 'Customer'
+    };
   } catch {
-    return 'customer@kiosweb3.com';
+    return { name: 'Customer' };
   }
 };
 
 /**
- * Get customer name for payment
+ * Build Midtrans customer_details object
+ * Only includes email if user has one
  */
-const getCustomerName = async (userId: string): Promise<string> => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { name: true }
-    });
-    return user?.name || 'Customer';
-  } catch {
-    return 'Customer';
+const buildMidtransCustomerDetails = (details: CustomerDetails) => {
+  const nameParts = details.name.split(' ');
+  const result: Record<string, string> = {
+    first_name: nameParts[0] || 'Customer',
+    last_name: nameParts.slice(1).join(' ') || ''
+  };
+
+  // Only add email if it exists (Midtrans accepts missing email)
+  if (details.email) {
+    result.email = details.email;
   }
+
+  return result;
 };
 
 /**
@@ -85,8 +100,7 @@ export const createQrisPayment = async (order: Order): Promise<PaymentResult> =>
   const auth = Buffer.from(`${midtransConfig.serverKey}:`).toString('base64');
 
   // Fetch actual customer details
-  const customerEmail = await getCustomerEmail(order.userId);
-  const customerName = await getCustomerName(order.userId);
+  const customerDetails = await getCustomerDetails(order.userId);
 
   const payload = {
     payment_type: 'qris',
@@ -100,11 +114,7 @@ export const createQrisPayment = async (order: Order): Promise<PaymentResult> =>
       price: order.amountIdr,
       quantity: 1,
     }],
-    customer_details: {
-      first_name: customerName.split(' ')[0] || 'Customer',
-      last_name: customerName.split(' ').slice(1).join(' ') || '',
-      email: customerEmail,
-    },
+    customer_details: buildMidtransCustomerDetails(customerDetails),
     qris: { acquirer: 'gopay' } // Default acquirer
   };
 
@@ -164,8 +174,7 @@ export const createSnapBankPayment = async (order: Order): Promise<PaymentResult
   const total = order.amountIdr + fee;
 
   // Fetch actual customer details
-  const customerEmail = await getCustomerEmail(order.userId);
-  const customerName = await getCustomerName(order.userId);
+  const customerDetails = await getCustomerDetails(order.userId);
 
   const payload = {
     transaction_details: {
@@ -188,11 +197,7 @@ export const createSnapBankPayment = async (order: Order): Promise<PaymentResult
         quantity: 1
       }
     ],
-    customer_details: {
-      first_name: customerName.split(' ')[0] || 'Customer',
-      last_name: customerName.split(' ').slice(1).join(' ') || '',
-      email: customerEmail,
-    },
+    customer_details: buildMidtransCustomerDetails(customerDetails),
     expiry: { unit: 'minutes', duration: midtransConfig.paymentExpiryMinutes }
   };
 
